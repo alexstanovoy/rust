@@ -20,6 +20,7 @@ use crate::ascii;
 use crate::char::{self, EscapeDebugExtArgs};
 use crate::mem;
 use crate::slice::{self, SliceIndex};
+use crate::hint;
 
 pub mod pattern;
 
@@ -2735,6 +2736,44 @@ impl str {
     #[stable(feature = "str_escape", since = "1.34.0")]
     pub fn escape_unicode(&self) -> EscapeUnicode<'_> {
         EscapeUnicode { inner: self.chars().flat_map(CharEscapeUnicode) }
+    }
+
+    /// Reverses the string slice in place.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut s = "Racecar!".to_owned();
+    /// s.reverse();
+    /// assert_eq!(s, "!racecaR");
+    /// ```
+    #[unstable(feature = "str_reverse", reason = "new API", issue = "353")]
+    #[inline]
+    pub fn reverse(&mut self) {
+        // SAFETY: The string is a valid UTF-8 after the reversal.
+        let s = unsafe { self.as_bytes_mut() };
+        s.reverse();
+
+        let mut index = s.len();
+        while index > 0 {
+            // SAFETY: `index` is always in `0..s.len()``.
+            let char_len = unsafe { s.get_unchecked(index - 1) }.leading_ones() as usize;
+
+            // SAFETY: By definition of UTF-8, number of bytes of a single char is
+            // up to 4, while 0 is used as a single byte char and 1 is not used.
+            // This hint helps the optimizer to inline call to `.reverse()` taking
+            // into account that every reversal is very small.
+            unsafe { hint::assert_unchecked(char_len <= 4 && char_len != 1) };
+
+            if char_len > 0 {
+                // SAFETY: `index` is always in `0..s.len()``, and `index - char_len >= 0`,
+                // since input is a valid UTF-8.
+                unsafe { s.get_unchecked_mut((index - char_len)..index) }.reverse();
+                index -= char_len;
+            } else {
+                index -= 1;
+            }
+        }
     }
 }
 
